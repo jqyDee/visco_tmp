@@ -1,0 +1,9 @@
+# no DS_Store
+.DS_Store
+
+# no udo
+.udo.toml
+
+# no Assignment 1
+Assignment_1/
+

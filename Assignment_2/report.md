@@ -43,6 +43,7 @@ And to run the program use:
 ./ass02 pyramid <image> [max_side]          # optional: downscale longest side first
 ./ass02 gabor <image> [max_side]            # Ex 3.1: filter bank + Sobel comparison
 ./ass02 gabor-sweep <image> [max_side]      # Ex 3.2: one parameter changed at a time
+./ass02 canny <image> [max_side]            # Ex 4.1 and 4.2
 ```
 Results are written to `./build/out/`.
 
@@ -455,3 +456,135 @@ psi = 90 deg is the better choice.
   direction. This includes the small dots on the rings and the fine signature,
   which are smaller than the Gabor wavelength. In turn, Sobel also responds to
   more fine wood texture and noise.
+
+## 4. Canny with automatic thresholds
+
+### What we did and why
+
+Inputs: the poster photo from Exercise 1 (`rectification.jpg`) and a second
+photo with a very different look (`image_2.jpg`, 3024 x 4032): a bowl full of
+coins, screws and sticky notes on a bright white table. Both are downscaled to
+1000 px on the longest side (`./ass02 canny <image> 1000`), giving 750 x 1000
+px. Hand-tuned thresholds depend on the resolution, so both images are used at
+the same size.
+
+Canny works in five steps (PS, slide 38): (1) smooth with a Gaussian, (2)
+gradient magnitude and direction with Sobel, (3) non-maximum suppression, which
+thins every edge to 1 px, (4) double threshold into strong (G >= high) and weak
+(low <= G < high) pixels, (5) hysteresis, which keeps a weak pixel only if it
+is connected to a strong one. Step 1 we do ourselves, because `cv::Canny` does
+not smooth. We use a 5 x 5 Gaussian with sigma = 1.4 as on slide 39. Steps 2 to
+5 run inside `cv::Canny`, and the only thing we have to choose are the two
+thresholds of step 4.
+
+**Otsu (1).** Otsu's method picks the grey value that splits the histogram into
+two classes with the smallest variance inside each class. `cv::threshold`
+returns this value. We use it as the high threshold and half of it as the low
+one (slide 43: high : low = 2:1 to 3:1):
+
+```cpp
+cv::GaussianBlur(src_gray, blurred, cv::Size(5, 5), 1.4);
+double otsu = cv::threshold(blurred, otsu_bin, 0, 255,
+                            cv::THRESH_BINARY | cv::THRESH_OTSU);
+cv::Canny(blurred, edges_otsu, otsu / 2, otsu, 3);
+```
+
+**Comparison (2).** All detectors get the same blurred image, so only the
+detector differs. Sobel and Laplacian are built as in the PS code: signed
+`CV_16S` output (with `CV_8U` the negative derivatives would be cut off),
+`convertScaleAbs` to get back to 8 bit, and for Sobel the sum
+0.5 |Gx| + 0.5 |Gy|. The Laplacian response is weak, so we scale it by 4 in
+`convertScaleAbs` to make it visible. For the hand-tuned Canny we started at
+50 / 150 (slide 45) and lowered the values until the fine details of the poster
+(signature, inner lines of the bottle) appeared, which gave 30 / 90 (3:1).
+To compare the two Canny results with a number, we count their edge pixels
+with `cv::countNonZero`, since the Canny output is binary (edge = 255,
+rest = 0).
+
+```cpp
+cv::Sobel(blurred, grad_x, CV_16S, 1, 0, 3);
+cv::Sobel(blurred, grad_y, CV_16S, 0, 1, 3);
+cv::convertScaleAbs(grad_x, abs_grad_x);
+cv::convertScaleAbs(grad_y, abs_grad_y);
+cv::addWeighted(abs_grad_x, 0.5, abs_grad_y, 0.5, 0, sobel);
+
+cv::Laplacian(blurred, lap, CV_16S, 3);
+cv::convertScaleAbs(lap, abs_lap, 4);
+```
+
+### Results
+
+| Image         | Otsu value | Canny Otsu low / high | edge px (Otsu) | Canny hand low / high | edge px (hand) |
+|---------------|-----------:|----------------------:|---------------:|----------------------:|---------------:|
+| rectification | 110        | 55 / 110              | 17735 (2.4 %)  | 30 / 90               | 19655 (2.6 %)  |
+| image_2       | 129        | 64.5 / 129            | 17509 (2.3 %)  | 30 / 90               | 23756 (3.2 %)  |
+
+*Table 4.1: Thresholds and number of edge pixels (out of 750 000) for both
+images.*
+
+![Input rectification](out/4_input_rectification.png)
+*Fig. 4.1: Greyscale input 1, poster on a wooden table.*
+
+![Compare rectification](out/4_compare_rectification.png)
+*Fig. 4.2: Input 1. Top: Sobel, Laplacian (scaled x4). Bottom: Canny with
+hand-tuned thresholds (30 / 90), Canny with Otsu thresholds (55 / 110).*
+
+![Input image_2](out/4_input_image_2.png)
+*Fig. 4.3: Greyscale input 2, bowl with small objects on a white table.*
+
+![Compare image_2](out/4_compare_image_2.png)
+*Fig. 4.4: Input 2. Top: Sobel, Laplacian (scaled x4). Bottom: Canny
+hand-tuned (30 / 90), Canny with Otsu thresholds (64.5 / 129).*
+
+![Hand vs Otsu image_2](out/4_hand_vs_otsu_image_2.png)
+*Fig. 4.5: Input 2, Canny hand-tuned (left) and with Otsu thresholds (right).*
+
+### Observations
+
+**Sobel** (Fig. 4.2, 4.4) finds all important contours, but they are several
+pixels wide and blurry, because there is no non-maximum suppression. The result
+is a grey magnitude, not an edge map, so a threshold would still be needed. The
+wood grain of the table shows up as texture over the whole image.
+
+**Laplacian** is the second derivative, so an edge lies at a zero crossing and
+the absolute value gives a double line on both sides of it. Its raw response
+is weak, so we had to scale it by 4. After that the contours are bright and
+sharp, but the scaling also amplifies the noise: the Laplacian reacts most to
+noise of all methods, and the wood and the white table are covered in fine
+speckle.
+
+**Canny** gives thin (1 px) and mostly closed contours on both images. Between
+the two threshold choices there is the trade-off from slide 45:
+- **Hand-tuned 30 / 90** is lower, so it is more complete. On the poster it
+  finds the signature "Villemot" and more lines inside the bottle, on image 2
+  more coin and screw outlines and the pattern on the rim of the bowl. In
+  return it also keeps more false edges: pieces of wood grain and shadow next
+  to the poster, and many short fragments in the pile of coins (about 36 % more
+  edge pixels than Otsu on image 2, Table 4.1).
+- **Otsu** is cleaner. The table texture is almost gone and only the strong
+  object contours remain, but the signature and some inner details are lost.
+  Otsu also adapts on its own: on the bright image 2 it picks a higher value
+  (129) than on the darker poster (110), while the hand-tuned values stay the
+  same for both images.
+
+Otsu is only a heuristic for Canny. It separates grey values (bright vs. dark
+regions), but Canny's thresholds act on the gradient magnitude, which is a
+different quantity. It works here because both photos have a clear
+bright / dark split. An example of the limit is the shadow of the bowl in image
+2: it is a strong brightness step and is found as an edge by every method,
+although it is not an object edge.
+
+**Ranking (worst to best).** Criteria, taken from the goal of Canny on slide
+38 ("thin, connected edges with few false edges") plus completeness and tuning
+effort:
+1. **Laplacian:** most noise-sensitive, double edges, weak raw response.
+2. **Sobel:** robust and complete, but thick edges and no decision what an edge
+   is.
+3. **Canny hand-tuned:** thin and connected, most details, but more false edges
+   and the values have to be found by hand for every image.
+4. **Canny Otsu:** thin, connected, fewest false edges and fully automatic.
+
+The ranking is the same for both images. Hand-tuned and Otsu are close: if
+completeness matters most, the hand-tuned version wins on the poster. Otsu is
+first for us because it gives a clean result on both images without any
+tuning.

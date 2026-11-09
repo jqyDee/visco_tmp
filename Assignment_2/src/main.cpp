@@ -2,6 +2,7 @@
 #include "pyramid.hpp"
 #include "gabor.hpp"
 #include "canny.hpp"
+#include "features.hpp"
 #include <filesystem>
 #include <iostream>
 #include <opencv2/imgcodecs.hpp>
@@ -16,7 +17,9 @@ static int usage(const char *prog) {
             << "  " << prog << " pyramid <image> [max_side]\n"
             << "  " << prog << " gabor <image> [max_side]\n"
             << "  " << prog << " gabor-sweep <image> [max_side]\n"
-            << "  " << prog << " canny <image> [max_side]\n";
+            << "  " << prog << " canny <image> [max_side]\n"
+            << "  " << prog << " features-bench <image> [max_side]\n"
+            << "  " << prog << " features-homography <image1> <image2> [max_side]\n";
   return EXIT_FAILURE;
 }
 
@@ -76,6 +79,31 @@ int main(int argc, char **argv) {
     // image file name without folder and extension: "../rectification.jpg" -> "rectification"
     std::string image_name = std::filesystem::path(argv[2]).stem().string();
     run_canny(img, "out", image_name);
+    return EXIT_SUCCESS;
+  }
+
+  if (cmd == "features-bench") {
+    if (argc > 4)
+      return usage(argv[0]);
+    if (argc == 4)
+      downscale(img, argv[3]);
+    run_feature_bench(img, "out/features");
+    return EXIT_SUCCESS;
+  }
+
+  if (cmd == "features-homography") {
+    if (argc < 4 || argc > 5)
+      return usage(argv[0]);
+    cv::Mat img2 = cv::imread(argv[3], cv::IMREAD_COLOR);
+    if (img2.empty()) {
+      std::cerr << "could not read " << argv[3] << '\n';
+      return EXIT_FAILURE;
+    }
+    if (argc == 5) {
+      downscale(img, argv[4]);
+      downscale(img2, argv[4]);
+    }
+    run_feature_homography(img, img2, "out/features");
     return EXIT_SUCCESS;
   }
 

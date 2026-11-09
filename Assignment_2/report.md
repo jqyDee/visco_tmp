@@ -6,7 +6,7 @@ Group: `TMP`
 
 Group-members: 
 - Tim Janush (csbb9638)
-- Paul Kretz (csXXXXXX)
+- Paul Kretz (csbb8565)
 - Matti Fischbach (csbb8241)
 
 ## Setup
@@ -44,6 +44,8 @@ And to run the program use:
 ./ass02 gabor <image> [max_side]            # Ex 3.1: filter bank + Sobel comparison
 ./ass02 gabor-sweep <image> [max_side]      # Ex 3.2: one parameter changed at a time
 ./ass02 canny <image> [max_side]            # Ex 4.1 and 4.2
+./ass02 features-bench <image> [max_side]   # Ex 5A/B: benchmark -> out/features/bench.csv
+./ass02 features-homography <img1> <img2> [max_side]   # Ex 5C: RANSAC homography
 ```
 Results are written to `./build/out/`.
 
@@ -225,17 +227,17 @@ smallest Gaussian level G4 as the top level (bottom right, normal colours).*
 
 | Level | Size | min L | max L |
 |---|---|---|---|
-| 0 | 768 x 1024 | -120.8 | 63.9 |
-| 1 | 384 x 512 | -78.6 | 41.5 |
-| 2 | 192 x 256 | -45.2 | 50.8 |
-| 3 | 96 x 128 | -36.2 | 52.2 |
-| 4 (= G4) | 48 x 64 | 2.2 | 202.4 |
+| 0 | 768 x 1024 | -112.3 | 109.0 |
+| 1 | 384 x 512 | -151.0 | 126.3 |
+| 2 | 192 x 256 | -176.5 | 151.5 |
+| 3 | 96 x 128 | -166.8 | 173.0 |
+| 4 (= G4) | 48 x 64 | 3.0 | 233.0 |
 
 *Table 2.1: Level sizes and value range of each Laplacian level (all channels).*
 
 | Comparison | max \|reconstructed - original\| |
 |---|---|
-| float (`CV_32FC3`) | 3.8e-6 |
+| float (`CV_32FC3`) | 0 |
 | after conversion to 8 bit | 0 |
 
 *Table 2.2: Reconstruction error from L0 ... L3 and G4.*
@@ -243,18 +245,19 @@ smallest Gaussian level G4 as the top level (bottom right, normal colours).*
 ### Observations
 
 **Low frequencies** are the parts of the image that change slowly over space.
-Examples are the overall brightness and colour of regions (white remote,
-brown table), large smooth gradients from the lighting, and the coarse shape
-of objects. They survive down to G4: at 48 x 64 px you can still see a white
-bar on a brown background.
+Examples are the overall brightness and colour of regions (blue poster,
+orange spiral, brown table), large smooth gradients from the lighting, and the
+coarse shape of objects. They survive down to G4: at 48 x 64 px you can still
+see a blue rectangle with an orange spot on a brown background.
 
 **Details that disappear first** are the finest structures, only 1 to 2 px
 wide in G0. Here these are the wood grain and scratches on the table, the thin
-dark outlines around the buttons, the small text ("prime video",
-"Rakuten TV", "Disney+"), the braille dots, and image noise. In G1 the text is
-already hard to read. In G2 the button labels are colour blobs, and the ring
-around the center button blurs together (Fig. 2.2). In G3 and G4 only the
-buttons as spots and the outline of the remote are left. Each reduce step
+white outlines of the glass and the straw, the small dots on the orange
+spiral, the signature ("Villemot"), and image noise. In G1 the signature is
+already hard to read. In G2 the dots on the spiral are gone, and the rim of
+the glass and the straw blur together (Fig. 2.2). In G3 and G4 only the
+colour areas (spiral, glass, green table top) and the outline of the poster
+are left. Each reduce step
 halves the highest frequency the image can show, so the smallest structures
 go first.
 
@@ -262,17 +265,21 @@ go first.
 two Gaussian levels: `L_i = G_i - expand(G_{i+1})`. It is a band-pass image
 with mean about 0. Most of it is grey, and it is non-zero only at edges and
 texture of the matching size.
-- L0: the finest details: wood grain, thin outlines, text strokes, noise.
-- L1: slightly coarser structure: button symbols and outlines, thicker grain.
-- L2 and L3: the outlines of the buttons, the large ring and the remote's
-  edge, as broad light/dark bands.
+- L0: the finest details: wood grain, thin outlines, the spiral dots and
+  letter strokes, noise.
+- L1: slightly coarser structure: outlines of the glass, straw and bottle,
+  thicker grain.
+- L2 and L3: the edges of the spiral, the black pole and the poster's border,
+  as broad light/dark bands.
 - The top level G4: the remaining low-pass image (average colours).
 
-The value range shrinks from L0 to L3 (Table 2.1). Most of the contrast of
-this image sits in the sharp edges.
+The value range grows from L0 to L3 (Table 2.1). Most of the contrast of
+this image sits in large, strong edges (black pole and white border against
+the blue, poster against the table), which belong to the coarser bands. The
+fine texture is weak.
 
-**Reconstruction** is exact up to float rounding (3.8e-6). After conversion to
-8 bit the difference is 0. This is expected, because by construction
+**Reconstruction** is exact: the largest difference is 0 already in float,
+and also after conversion to 8 bit. This is expected, because by construction
 `G_i = L_i + expand(G_{i+1})`. The same `expand` is used to build and to
 reconstruct, so the pyramid does not lose any information.
 
@@ -588,3 +595,215 @@ The ranking is the same for both images. Hand-tuned and Otsu are close: if
 completeness matters most, the hand-tuned version wins on the poster. Otsu is
 first for us because it gives a clean result on both images without any
 tuning.
+
+## 5. Feature detectors: benchmark and homography
+
+### What we did and why
+
+**Benchmark (A).** Input is the poster photo from Exercise 1
+(`rectification.jpg`), downscaled to 1000 px on the longest side
+(`./ass02 features-bench rectification.jpg 1000`), giving 750 x 1000 px. We
+build the transformed copy ourselves with `warpPerspective`, so we know the
+true homography H for every pixel. This is the ground truth that lets us
+check every single match, not only count them.
+
+H is built as a 3 x 3 matrix for each transformation. Rotation and scaling
+come from `getRotationMatrix2D` around the image center. This returns the 2 x
+3 affine matrix, so we append the row {0, 0, 1} to get a homography. For the
+perspective tilt we move the two top corners inwards by 20 % of the width and
+solve for H with `getPerspectiveTransform`, so the image looks like it leans
+back:
+
+```cpp
+cv::Mat M = cv::getRotationMatrix2D(center, angle, scale);   // 2x3
+cv::vconcat(M, cv::Mat(cv::Matx13d(0, 0, 1)), H);            // 3x3
+
+const float d = 0.2f * w;
+std::vector<cv::Point2f> src = {{0, 0}, {w, 0}, {w, h}, {0, h}};
+std::vector<cv::Point2f> dst = {{d, 0}, {w - d, 0}, {w, h}, {0, h}};
+cv::Mat H = cv::getPerspectiveTransform(src, dst);
+```
+
+All three detectors produce binary descriptors, so we match them with a
+brute-force matcher and the Hamming distance (number of different bits). A
+nearest neighbour always exists, even for a keypoint that has no partner in
+the other image. We therefore use Lowe's ratio test: `knnMatch` returns the
+best and second best candidate, and we keep a match only if the best one is
+clearly better (distance < 0.8 x second distance). These are the "kept"
+matches. On repeated texture (letters, wood grain) both candidates are almost
+equally close and the match is dropped as ambiguous.
+
+```cpp
+cv::BFMatcher matcher(cv::NORM_HAMMING);
+matcher.knnMatch(desc1, desc2, knn, 2);
+for (const auto &pair : knn)
+  if (pair.size() == 2 && pair[0].distance < ratio * pair[1].distance)
+    kept.push_back(pair[0]);
+```
+
+A kept match is **correct** if the keypoint from image 1, mapped with the true
+H, lands within 3 px of its matched keypoint in image 2:
+
+```cpp
+cv::perspectiveTransform(kp1Matches, projected, H);
+for (size_t i = 0; i < matches.size(); ++i)
+  if (cv::norm(projected[i] - kp2[matches[i].trainIdx].pt) < max_px)
+    correct++;
+```
+
+Precision is correct / kept. Runtime is measured with `std::chrono` around
+`detectAndCompute` for both images plus the matching. The first call of every
+detector is much slower (memory allocation, thread pool start-up; ORB took 72
+ms instead of 18 ms), so every detector is run once on the input before the
+timed loop. Detector parameters: ORB with `nfeatures = 2000` (default is 500),
+AKAZE and BRISK with OpenCV defaults. In OpenCV 5, ORB is in
+`opencv2/features.hpp`, AKAZE and BRISK in `opencv2/xfeatures2d.hpp`
+(`cv::xfeatures2d::AKAZE`) and `findHomography` in `opencv2/geometry/3d.hpp`.
+
+**Experiments (B).** Rotation by 0, 30, 60 and 90 deg (scale 1), scaling by
+0.25, 0.5, 2 and 3 (no rotation), and one tilt of 0.2. The output image keeps
+the input size, so at 90 deg and at scale 2 and 3 parts of the content leave
+the frame. Fewer correct matches there are partly caused by the smaller
+overlap, not only by the detector. Precision is not affected by this, so we
+look at both. The plots are made from the CSV with `plot_bench.py`
+(matplotlib).
+
+**Homography from real photos (C).** We photographed a magazine on a table
+from two positions (`a.jpg`, `b.jpg`, 3024 x 4032, downscaled to 900 x 1200
+with `./ass02 features-homography a.jpg b.jpg 1200`). The camera is rotated by
+about 30 deg and looks from a different angle, but stays at a similar
+distance. A cup next to the magazine is a 3D object outside the plane. We use
+ORB (`nfeatures = 5000`): it is the fastest detector and has the highest
+precision for moderate transformations (rotation 30 deg and tilt: 0.94,
+Table 5.1). Its weak point, large scale changes, is avoided by keeping the
+distance similar. The matches go into `findHomography` with RANSAC and a 3 px
+threshold. The returned mask marks the inliers:
+
+```cpp
+cv::Mat H = cv::findHomography(pts1, pts2, cv::RANSAC, 3.0, mask);
+int inliers = cv::countNonZero(mask);
+cv::warpPerspective(img1, warped, H, img2.size());
+cv::addWeighted(warped, 0.5, img2, 0.5, 0.0, overlay);
+```
+
+To check H we also map the border of photo 1 with `perspectiveTransform` and
+draw it into photo 2.
+
+### Results
+
+![Tilt](out/features/bench_tilt_0.200000.png)
+*Fig. 5.1: Example of a transformed copy: perspective tilt 0.2 (top corners
+moved inwards by 20 % of the width).*
+
+| Transformation | ORB correct / kept (prec.) | AKAZE correct / kept (prec.) | BRISK correct / kept (prec.) |
+|---|---:|---:|---:|
+| rotation 0 deg  | 2000 / 2000 (1.00) | 1080 / 1080 (1.00) | 1164 / 1164 (1.00) |
+| rotation 30 deg | 1346 / 1437 (0.94) | 787 / 863 (0.91)   | 519 / 612 (0.85)   |
+| rotation 60 deg | 1344 / 1474 (0.91) | 744 / 801 (0.93)   | 549 / 651 (0.84)   |
+| rotation 90 deg | 1434 / 1617 (0.89) | 897 / 926 (0.97)   | 720 / 820 (0.88)   |
+| scale 0.25      | 67 / 94 (0.71)     | 82 / 119 (0.69)    | 143 / 161 (0.89)   |
+| scale 0.5       | 577 / 603 (0.96)   | 357 / 405 (0.88)   | 422 / 455 (0.93)   |
+| scale 2         | 358 / 469 (0.76)   | 210 / 244 (0.86)   | 221 / 282 (0.78)   |
+| scale 3         | 121 / 226 (0.54)   | 74 / 120 (0.62)    | 105 / 175 (0.60)   |
+| tilt 0.2        | 861 / 918 (0.94)   | 435 / 498 (0.87)   | 409 / 483 (0.85)   |
+
+*Table 5.1: Kept matches (after ratio test), correct matches (< 3 px from the
+true position) and precision for every detector and transformation. Keypoints
+in image 1: ORB 2000 (capped), AKAZE 1080, BRISK 1164.*
+
+| Detector | Runtime per pair (ms) |
+|---|---:|
+| ORB   | 17 - 20  |
+| BRISK | 22 - 31  |
+| AKAZE | 99 - 108 |
+
+*Table 5.2: Runtime for detection + description of both images and matching,
+range over all 9 transformations (after warm-up).*
+
+![Rotation](out/features/5_bench_rotation.png)
+*Fig. 5.2: Correct matches (left) and precision (right) against the rotation
+angle, scale 1.*
+
+![Scale](out/features/5_bench_scale.png)
+*Fig. 5.3: Correct matches (left) and precision (right) against the scale
+factor (log axis), no rotation.*
+
+| Quantity | Value |
+|---|---|
+| Keypoints photo 1 / photo 2 | 5000 / 5000 |
+| Kept matches (ratio test) | 1661 |
+| RANSAC inliers | 1371 (82.5 %) |
+
+*Table 5.3: Matching of the two real photos with ORB.*
+
+![Matches](out/features/5c_matches.jpg)
+*Fig. 5.4: Matches between the two photos. Green: RANSAC inliers, red:
+outliers. The red lines are drawn on top, so they look more dominant than
+they are (17.5 % of the matches).*
+
+![Overlay](out/features/5c_overlay.jpg)
+*Fig. 5.5: Photo 1 warped with the estimated H onto photo 2, blended 50 / 50.
+The magazine is sharp, the cup appears twice.*
+
+![Frame](out/features/5c_frame.jpg)
+*Fig. 5.6: Photo 2 with the border of photo 1 mapped through H (yellow).*
+
+### Observations
+
+**Rotation.** All three detectors are rotation invariant. Between 30 and 90 deg
+the number of correct matches stays almost constant and the precision stays
+between 0.84 and 0.97 (Fig. 5.2). ORB computes an orientation for every FAST
+corner from the intensity centroid and rotates its BRIEF pattern accordingly.
+AKAZE and BRISK also estimate a main orientation for each keypoint. The drop
+from 0 to 30 deg is caused by the warp, not by the detectors: interpolation
+blurs the image and the corners of the image leave the frame. 90 deg is better
+than 30 and 60 deg for all three, because a 90 deg rotation maps pixels
+exactly onto the pixel grid and nothing is interpolated.
+
+**Scale.** All three detect keypoints at several scales (ORB: image pyramid
+with 8 levels and factor 1.2, AKAZE: nonlinear scale space, BRISK: scale space
+over octaves), so in the range 0.5 to 2 all of them keep a precision of at
+least 0.76. At the extremes they differ (Fig. 5.3). At 0.25 BRISK keeps 0.89
+precision and the most correct matches (143), while ORB and AKAZE drop to
+about 0.7. At 3 all three fall to about 0.6, ORB is the lowest with 0.54. ORB
+is therefore only scale invariant in a limited range: its pyramid covers
+1.2^7 = 3.6x, and at the strongest changes the matching keypoints are no longer
+in the same pyramid levels. AKAZE is the most stable when the image gets
+bigger (scale 2: 0.86), BRISK when it gets smaller. The number of correct
+matches at scale 2 and 3 is also low because most of the enlarged image is
+outside the frame.
+
+**Is the ranking the same for every transformation?** No. By the number of
+correct matches ORB is first in almost every case, but this is mostly because
+it is allowed 2000 keypoints and AKAZE and BRISK find only about 1100. The
+exception is scale 0.25, where BRISK has twice as many correct matches. By
+precision the winner changes: ORB for rotation 30 deg, scale 0.5 and tilt,
+AKAZE for rotation 60 / 90 deg and scale 2 and 3, BRISK for scale 0.25. In
+runtime the order is always the same: ORB is fastest, BRISK about 1.5x
+slower, AKAZE about 5x slower (Table 5.2), because building the nonlinear
+scale space is expensive. Overall AKAZE is the most robust, but ORB gives
+almost the same precision for moderate transformations at a fraction of the
+time.
+
+**Real photos.** 82.5 % of the kept matches are RANSAC inliers. In the overlay
+(Fig. 5.5) the magazine is sharp: text, logo and picture lie exactly on top
+of each other. The cup appears twice, as expected: it sticks out of the plane,
+and a homography only describes the mapping of one plane. Its matches are
+therefore outliers (red in Fig. 5.4). Most other outliers lie in the block of
+text on the right half of the magazine, where the same letters repeat and ORB
+matches the wrong "e" or "n". The shadow of the cup is matched as inlier,
+because it lies on the table plane and the lamp did not move. The mapped border
+of photo 1 (Fig. 5.6) is a slightly distorted rectangle rotated by about 30
+deg, which fits the camera movement.
+
+**Why RANSAC here, but not in Exercise 1?** In Exercise 1 we clicked exactly
+the 4 corners by hand. 4 correct point pairs give exactly the 8 equations for
+the 8 unknowns of H, so `getPerspectiveTransform` can solve it directly and
+there is nothing to reject. Here we have 1661 automatic matches, and a part of
+them is wrong (the benchmark shows that even under ideal conditions precision
+is below 1, and here 290 matches are outliers). A least-squares fit over all
+matches would be pulled away by every wrong match. RANSAC fits H to random
+sets of 4 matches, counts how many matches agree with it within 3 px and keeps
+the H with the most inliers. Wrong matches do not agree with each other, so
+they never win, and the cup is ignored as well, because it does not lie on
+the dominant plane.

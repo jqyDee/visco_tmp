@@ -10,3 +10,4 @@ Assignment_1/
 **/dist/*
 **/build/*
 compile_commands.json
+**/.cache/*

@@ -5,7 +5,7 @@ Deadline: 23.59 09.11.2026
 Group: `TMP`
 
 Group-members: 
-- Tim Janush (csXXXXXX)
+- Tim Janush (csbb9638)
 - Paul Kretz (csXXXXXX)
 - Matti Fischbach (csbb8241)
 
@@ -41,6 +41,8 @@ And to run the program use:
 ./ass02 rectify <image>                     # click corners TL, TR, BR, BL, Enter
 ./ass02 rectify <image> x_tl y_tl x_tr y_tr x_br y_br x_bl y_bl
 ./ass02 pyramid <image> [max_side]          # optional: downscale longest side first
+./ass02 gabor <image> [max_side]            # Ex 3.1: filter bank + Sobel comparison
+./ass02 gabor-sweep <image> [max_side]      # Ex 3.2: one parameter changed at a time
 ```
 Results are written to `./build/out/`.
 
@@ -285,3 +287,171 @@ reconstruct, so the pyramid does not lose any information.
 - **Editing:** sharpening or denoising by amplifying or damping single
   frequency bands, and progressive transmission (send G4 first, then the
   L levels).
+
+## 3. Gabor filter bank
+
+### What we did and why
+
+Input: the photo from Exercise 1 (`rectification.jpg`, 8064 x 6048). We first
+downscaled it with `INTER_AREA` to 1000 px on the longest side
+(`./ass02 gabor rectification.jpg 1000`), giving 750 x 1000 px. At full
+resolution a wavelength of 10 px only matches tiny details like wood grain and
+noise, and every output image would be 10 to 16 MB. The image is converted to
+greyscale and to float in [0, 1], because the filter responses are signed.
+
+**Filter bank (1).** For each orientation 0, 45, 90 and 135 deg we build one
+kernel with `getGaborKernel` (theta in radians). We use `ksize = 31`,
+`sigma = 4` (width of the Gaussian envelope), `lambda = 10` (wavelength of the
+stripes in px), `gamma = 0.5` (aspect ratio of the envelope, < 1 means
+stretched along the stripes) and `psi = 0` (phase, symmetric kernel with a
+bright center stripe). `ksize` has to cover about +-3 sigma, otherwise the
+kernel is cut off.
+
+```cpp
+cv::Mat k = cv::getGaborKernel(cv::Size(p.ksize, p.ksize), p.sigma,
+                               deg * CV_PI / 180.0, p.lambda, p.gamma,
+                               p.psi, CV_32F);
+k -= cv::mean(k)[0]; // zero mean: flat areas give 0
+```
+
+Removing the mean is needed. With `psi = 0` the values of the OpenCV kernel
+sum to about 8, not 0. Such a kernel also acts like a blur: on a flat area it
+returns 8 times the brightness. Our first results looked like a low-contrast
+copy of the photo, because the brightness dominated the stripe response. After
+removing the mean (the DC part), flat areas give 0 and only structure remains.
+
+Each kernel is applied with `filter2D` and a float output (`CV_32F`). The four
+responses are combined by the per-pixel maximum. We compared two variants: the
+maximum of the signed responses ("raw") and the maximum of the absolute values
+("abs"):
+
+```cpp
+cv::filter2D(gray, r, CV_32F, k);              // for each orientation
+cv::Mat combined = cv::abs(responses[0]);
+for (size_t i = 1; i < responses.size(); i++) {
+  cv::Mat a = cv::abs(responses[i]);
+  cv::max(combined, a, combined);
+}
+```
+
+For display every float image is stretched to 0 to 255 with `normalize`
+(`NORM_MINMAX`). For kernels and signed responses, grey therefore means 0,
+brighter means positive and darker means negative. The kernels are scaled up
+with nearest neighbour to the height of the result and placed to its left.
+
+**Parameter sweep (2).** `./ass02 gabor-sweep` runs the whole bank (abs
+variant) again with the default values from above and changes exactly one
+parameter at a time. Only in the sigma sweep we use `ksize = 61` for all three
+values, otherwise the kernel for sigma = 8 would be cut off.
+
+**Sobel (2).** For the comparison we compute the gradient magnitude on the same
+greyscale image:
+
+```cpp
+cv::Sobel(gray, gx, CV_32F, 1, 0, 3);
+cv::Sobel(gray, gy, CV_32F, 0, 1, 3);
+cv::magnitude(gx, gy, mag);
+```
+
+### Results
+
+![Gabor 0](out/3_gabor_pair_0.jpg)
+*Fig. 3.1: Left: kernel 0 deg (vertical stripes). Right: its signed response
+(grey = 0).*
+
+![Gabor 45](out/3_gabor_pair_45.jpg)
+*Fig. 3.2: Left: kernel 45 deg. Right: its signed response.*
+
+![Gabor 90](out/3_gabor_pair_90.jpg)
+*Fig. 3.3: Left: kernel 90 deg (horizontal stripes). Right: its signed
+response.*
+
+![Gabor 135](out/3_gabor_pair_135.jpg)
+*Fig. 3.4: Left: kernel 135 deg. Right: its signed response.*
+
+![Combined raw](out/3_gabor_combined_raw.jpg)
+*Fig. 3.5: The four responses combined by the maximum of the signed values
+("raw").*
+
+![Combined abs](out/3_gabor_combined.jpg)
+*Fig. 3.6: The four responses combined by the maximum of the absolute values
+("abs"). This variant is used for the sweep and the Sobel comparison.*
+
+![Sweep sigma](out/3_sweep_sigma.jpg)
+*Fig. 3.7: Combined result for sigma = 2, 4 and 8 (left to right, ksize = 61).*
+
+![Sweep lambda](out/3_sweep_lambda.jpg)
+*Fig. 3.8: Combined result for lambda = 5, 10 and 20.*
+
+![Sweep gamma](out/3_sweep_gamma.jpg)
+*Fig. 3.9: Combined result for gamma = 0.25, 0.5 and 1.*
+
+![Sweep psi](out/3_sweep_psi.jpg)
+*Fig. 3.10: Combined result for psi = 0 and 90 deg.*
+
+![Sweep ksize](out/3_sweep_ksize.jpg)
+*Fig. 3.11: Combined result for ksize = 15, 31 and 61.*
+
+![Gabor vs Sobel](out/3_gabor_vs_sobel.jpg)
+*Fig. 3.12: Left: Gabor bank (abs, default parameters). Right: Sobel gradient
+magnitude.*
+
+### Observations
+
+**Each orientation** responds to lines and edges that run parallel to its
+stripes (Fig. 3.1 ... 3.4). The 0 deg kernel marks the steep long edges of the
+poster and the vertical strokes of the letters, while the horizontal wood grain
+almost disappears. The 90 deg kernel is the opposite: the wood grain and the
+top and bottom edges of the poster are strong. The 45 deg kernel matches the
+long poster edges best, because the poster lies tilted in the photo. The
+135 deg kernel shows the shorter poster edges and strokes in the other diagonal
+direction. Thin bright lines give a bright response, thin dark lines a dark
+one.
+
+**Raw vs. abs.** The raw maximum only keeps positive responses, so dark lines
+on a bright background lose (Fig. 3.5). At corners the four orientations
+disagree, and star-shaped streaks from the side stripes of the kernels appear.
+With the absolute value, bright and dark lines count the same and flat areas
+are black (Fig. 3.6). Every edge now gives a double line. With `psi = 0` the
+kernel is a line detector (bright center, dark sides), so a step edge gives a
+positive response on one side and a negative one on the other.
+
+**What each parameter does:**
+- **sigma** sets the size of the envelope and so the number of visible
+  stripes (Fig. 3.7). With sigma = 2 the envelope is smaller than one
+  wavelength and only one stripe is left. The kernel works like a blob or edge
+  detector with wide halos. With sigma = 8 there are many stripes and the
+  kernel is very selective. Only long straight structures with period lambda
+  remain, with striped ringing, and the letters fall apart.
+- **lambda** sets the distance between the stripes (Fig. 3.8). lambda = 5 only
+  finds very fine details and is weak and noisy. lambda = 20 gives thick lines,
+  the double contours move apart, and the result is smoother.
+- **gamma** sets the shape of the envelope: 0.25 is long and narrow, 1 is
+  round (Fig. 3.9). A small gamma prefers long straight edges and is more
+  selective in orientation, but gives streaks at corners. gamma = 1 also picks
+  up short structures and more background texture.
+- **psi** shifts the phase (Fig. 3.10). psi = 0 gives a symmetric kernel (line
+  detector), psi = 90 deg an antisymmetric dark/bright kernel (edge detector).
+  With psi = 90 deg each edge gives one contour instead of the double line.
+- **ksize** only cuts the kernel (Fig. 3.11). With 15 px the outer stripes are
+  cut off (15 px < 6 sigma). 31 and 61 look almost the same, because the
+  envelope is already about 0 at the border.
+
+**Best setting.** For this photo the defaults (sigma = 4, lambda = 10,
+gamma = 0.5, ksize = 31) find the structures best. The poster border, the
+letters, the pole and the outlines of bottle and glass are clean closed
+contours, and the wood grain stays weak. For an edge map with single lines,
+psi = 90 deg is the better choice.
+
+**Gabor vs. Sobel** (Fig. 3.12):
+- **Gabor finds, Sobel does not:** the bank is selective in orientation and in
+  scale. It answers strongly to structures with a width of about lambda / 2,
+  such as the poster border and the pole, and suppresses finer noise and
+  texture. Each orientation can be read out on its own (Fig. 3.1 ... 3.4),
+  while Sobel only gives one magnitude without frequency information. A thin
+  line gives one response with Gabor, but two edges with Sobel.
+- **Sobel finds, Gabor does not:** Sobel uses a 3 x 3 kernel, so its contours
+  are thin and sharp. It finds every edge regardless of its width and
+  direction. This includes the small dots on the rings and the fine signature,
+  which are smaller than the Gabor wavelength. In turn, Sobel also responds to
+  more fine wood texture and noise.

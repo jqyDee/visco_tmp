@@ -9,7 +9,7 @@ find_package(OpenCV REQUIRED)
 message(STATUS "OpenCV found at: ${OpenCV_DIR}")
 message(STATUS "OpenCV version: ${OpenCV_VERSION}")
 
-add_executable(ass02 main.cpp rectification.cpp pyramid.cpp)
+add_executable(ass02 main.cpp rectification.cpp pyramid.cpp gabor.cpp)
 
 target_include_directories(ass02 PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}

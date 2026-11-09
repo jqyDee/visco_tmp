@@ -1,6 +1,8 @@
 #include "rectification.hpp"
 #include "pyramid.hpp"
 #include "gabor.hpp"
+#include "canny.hpp"
+#include <filesystem>
 #include <iostream>
 #include <opencv2/imgcodecs.hpp>
 #include <string>
@@ -13,7 +15,8 @@ static int usage(const char *prog) {
             << " rectify <image> [x_tl y_tl x_tr y_tr x_br y_br x_bl y_bl]\n"
             << "  " << prog << " pyramid <image> [max_side]\n"
             << "  " << prog << " gabor <image> [max_side]\n"
-            << "  " << prog << " gabor-sweep <image> [max_side]\n";
+            << "  " << prog << " gabor-sweep <image> [max_side]\n"
+            << "  " << prog << " canny <image> [max_side]\n";
   return EXIT_FAILURE;
 }
 
@@ -59,8 +62,20 @@ int main(int argc, char **argv) {
       run_pyramid(img, "out");
     else if (cmd == "gabor")
       run_gabor(img, "out");
-    else
+    else if (cmd == "gabor-sweep")
       run_gabor_sweep(img, "out");
+    return EXIT_SUCCESS;
+  }
+
+  if (cmd == "canny") {
+    if (argc > 4)
+      return usage(argv[0]);
+    if (argc == 4)
+      downscale(img, argv[3]);
+
+    // image file name without folder and extension: "../rectification.jpg" -> "rectification"
+    std::string image_name = std::filesystem::path(argv[2]).stem().string();
+    run_canny(img, "out", image_name);
     return EXIT_SUCCESS;
   }
 

@@ -11,3 +11,4 @@ Assignment_1/
 **/build/*
 compile_commands.json
 **/.cache/*
+**/bin/*

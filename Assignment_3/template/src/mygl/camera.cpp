@@ -1,8 +1,8 @@
 #include "camera.h"
+#include "math/vector3d.h"
 
 #define _USE_MATH_DEFINES
 #include <algorithm>
-#include <iostream>
 #include <math.h>
 
 namespace detail {
@@ -62,8 +62,20 @@ void cameraUpdateOrbit(Camera &cam, const Vector2D &mouseDiff, float zoom) {
 }
 
 void cameraFollow(Camera &cam, const Vector3D &pos) {
-  cam.position += pos - cam.lookAt;
-  cam.lookAt = pos;
+  cam.lookAt = pos + Vector3D(0.0f, 1.5f, 0.0f);
+}
+
+void cameraChase(Camera &cam, const Vector3D &pos, const float yaw) {
+  // rotate the base cam offset around the yaw of the orni
+  // this gives us a point in the ornithopters local coordinate system
+  const Vector3D rotateOffset =
+      Matrix3D::rotationY(yaw) * BASE_CAM_CHASE_OFFSET;
+
+  // add a look at position 2 units above the ornis origin position in world
+  // space
+  cam.lookAt = pos + Vector3D(0.0f, 2.0f, 0.0f);
+  // position the camera in world space with our calculated rotated point.
+  cam.position = pos + rotateOffset;
 }
 
 void setCameraRotation(Camera &cam, const Matrix3D &rotation) {

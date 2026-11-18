@@ -6,14 +6,7 @@
 
 #define BASE_FOV static_cast<float>(to_radians(45))
 #define BASE_CAM_FOLLOW_OFFSET Vector3D(0.0, 5.0, -15.0)
-#define BASE_CAM_CHASE_OFFSET Vector3D(0.0, 10.0, -25.0)
 #define BASE_CAM_POSITION Vector3D(100, 80, -40)
-
-enum CameraMode {
-  CAM_NORMAL,
-  CAM_FOLLOW,
-  CAM_CHASE,
-};
 
 struct Camera {
   float width;
@@ -61,19 +54,10 @@ Matrix4D cameraView(const Camera &cam);
 //
 // @param cam Camera that gets updated.
 // @param mouseDiff X and Y distances that are used to change the spherical
-//        coordinate angles of the camera position with respect to the look at
-//        point.
+//        coordinate angles of the camera position with respect to the look at point.
 // @param zoom Factor to zoom in (-) or out (+) (distance of camera position to
 //        look at point is de-/increased).
 void cameraUpdateOrbit(Camera &cam, const Vector2D &mouseDiff, float zoom);
-
-// Updates camera lookAt and the camera position so that the camera chases the
-// ornithopter
-//
-// @param cam Camera that gets updated.
-// @param pos New lookAt position at the ornithoper.
-// @param yaw of the ornithopter
-void cameraChase(Camera &cam, const Vector3D &pos, const float yaw);
 
 // Updates camera lookAt and the camera position so that the distance
 // between lookAt and the camera position stays the same.

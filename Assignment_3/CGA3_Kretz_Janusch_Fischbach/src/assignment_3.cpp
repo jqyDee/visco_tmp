@@ -40,13 +40,7 @@ struct WingFlapAnimation {
 
 inline float smoothstep(float x) { return x * x * (3.0f - 2.0f * x); }
 
-enum WingPhase {
-  WING_REST,
-  WING_OPENING,
-  WING_FLIPPING_TO,
-  WING_FLIPPING_BACK,
-  WING_FLAPPING
-};
+enum WingPhase { WING_REST, WING_OPENING, WING_FLIPPING, WING_FLAPPING };
 
 struct WingAnimation {
   WingPhase phase = WING_REST;
@@ -66,18 +60,7 @@ struct WingAnimation {
     }
   }
 
-  void flipStep() {
-    float s = smoothstep(std::min(phaseTime / flipDuration, 1.0f));
-    if (phase == WING_FLIPPING_BACK) {
-      s = -s;
-    }
-    flip = s * static_cast<float>(M_PI); // 0deg to 180deg
-    if (phaseTime >= flipDuration) {
-      phase = (phase == WING_FLIPPING_TO) ? phase = WING_FLIPPING_BACK
-                                          : WING_FLAPPING;
-      phaseTime = 0.0f;
-    }
-  }
+  void flipStep() {}
 
   void update(float dt) {
     phaseTime += dt;
@@ -89,17 +72,18 @@ struct WingAnimation {
       const float s = smoothstep(std::min(phaseTime / openDuration, 1.0f));
       splay = (1.0f - s) * restSplay; // 74deg to 0deg
       if (phaseTime >= openDuration) {
-        phase = WING_FLIPPING_TO;
+        phase = WING_FLIPPING;
         phaseTime = 0.0f;
       }
       break;
     }
-    case WING_FLIPPING_TO: {
-      flipStep();
-      break;
-    }
-    case WING_FLIPPING_BACK: {
-      flipStep();
+    case WING_FLIPPING: {
+      float s = smoothstep(std::min(phaseTime / flipDuration, 1.0f));
+      flip = s * static_cast<float>(M_PI); // 0deg to 180deg
+      if (phaseTime >= flipDuration) {
+        phase = WING_FLAPPING;
+        phaseTime = 0.0f;
+      }
       break;
     }
     case WING_FLAPPING:
@@ -112,15 +96,19 @@ struct WingAnimation {
     return phase == WING_FLAPPING ? flap.angleZ() : 0.0f;
   }
 
-  // Wings count as "full speed" once 95% of the final flap rate is reached.
-  static constexpr float fullSpeedThreshold = 0.95f;
+  // Wings count as "full speed" once 90% of the final flap rate is reached.
+  static constexpr float fullSpeedThreshold = 0.90f;
+  // Wings need 50% speed before ornithopter lifting off
+  static constexpr float liftOffThreshold = 0.5f;
 
   // Take-off progress 0..1, eased, reaches exactly 1 at full speed.
   float takeoffProgress() const {
     if (phase != WING_FLAPPING)
       return 0.0f;
-    return smoothstep(
-        std::min(flap.speedFraction() / fullSpeedThreshold, 1.0f));
+
+    const float x = (flap.speedFraction() - liftOffThreshold) /
+                    (fullSpeedThreshold - liftOffThreshold);
+    return smoothstep(std::clamp(x, 0.0f, 1.0f));
   }
 
   bool fullSpeed() const {
@@ -419,8 +407,6 @@ void sceneUpdate(float dt) {
   if (sScene.camMode == CAM_FOLLOW) {
     cameraFollow(sScene.camera, o.position);
   }
-
-  sScene.animation.update(dt);
 }
 
 void drawCube(const Mesh &m, const Matrix4D pos) {

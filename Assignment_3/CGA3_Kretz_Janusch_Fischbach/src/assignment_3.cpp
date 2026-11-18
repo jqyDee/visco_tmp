@@ -48,7 +48,9 @@ struct WingAnimation {
   float openDuration = 3.0f;
   float flipDuration = 1.5f;
 
+  // folded wing angle from the drawing
   float restSplay = to_radians(90.0f - 16.0f);
+  // current splay/flip value
   float splay = to_radians(90.0f - 16.0f);
   float flip = 0.0f;
   WingFlapAnimation flap;
@@ -59,8 +61,6 @@ struct WingAnimation {
       phaseTime = 0.0f;
     }
   }
-
-  void flipStep() {}
 
   void update(float dt) {
     phaseTime += dt;
@@ -117,10 +117,10 @@ struct WingAnimation {
 };
 
 enum CubeColor {
-  BODY = 0,         // 102 = 0.4
-  WINGS = 1,        // 25 = 0.1
-  FOOT = 2,         // 150 = 0.6
-  GROUND_PLATE = 3, // 50 = 0.2
+  BODY = 0,         // color value picture (r = g = b =) 102 (/ 256) ~ 0.4
+  WINGS = 1,        // color value picture (r = g = b =) 25  (/ 256) ~ 0.1
+  FOOT = 2,         // color value picture (r = g = b =) 150 (/ 256) ~ 0.6
+  GROUND_PLATE = 3, // color value picture (r = g = b =) 50  (/ 256) ~ 0.2
 };
 
 struct Object {
@@ -139,18 +139,30 @@ struct Object {
 
 struct Wing {
   Matrix4D scaling = Matrix4D::scale(3.75f, 0.05f, 0.15f);
+  // move pivot half the length of the long edge (x)
   Matrix4D pivot = Matrix4D::translation({3.75f, 0.0f, 0.0f});
 
-  // Left-side root points (plate-centered frame). Right side = mirrored.
+  // Left-side root points from drawing. Only left side as right side is
+  // mirrored in sceneDraw.
   Vector3D roots[4] = {
       {0.55f, 2.3f, -0.15f}, // top outer
       {0.4f, 2.3f, -1.0f},   // top inner
       {0.6f, 1.35f, 0.0f},   // bottom outer
       {0.5f, 1.35f, -0.9f},  // bottom inner
   };
-  // Top and bottom wings flap in opposite directions.
+  // Top and bottom wings flap in opposite directions. Needed as wings are
+  // coupled and would flap in the same dir, which is different to the demos
+  // video.
   float flapDir[4] = {1.0f, 1.0f, -1.0f, -1.0f};
 
+  // applied right to left
+  // scale
+  //    -> pivot (shift so the wing root sits at the origin)
+  //    -> flip (around X)
+  //    -> flap (around Z)
+  //    -> splay (around Y)
+  //
+  // Note: the translation is done in draw with the root vectors
   Matrix4D local(float splay, float flip, float flapAngle) const {
     return Matrix4D::rotationY(splay) * Matrix4D::rotationZ(flapAngle) *
            Matrix4D::rotationX(flip) * pivot * scaling;
@@ -158,7 +170,8 @@ struct Wing {
 };
 
 struct Ornithopter {
-  // elevation on "engine" start
+  // ground height on startup (floor roughly at y = 2.0f on x = 0.0f and z =
+  // 0.0f)
   float groundY = 2.0f;
   float liftHeight = 2.0f;
   bool controlsUnlocked = false;
@@ -168,6 +181,8 @@ struct Ornithopter {
   float speed = 4.0f;
   float turnSpeed = M_PI / 2.0f;
   float maxTilt = to_radians(10.0f);
+  // Tilt responsiveness in 1/s (not deg/s): each frame pitch/roll close
+  // tiltSpeed*dt of the gap to their target. ~95% settled after 3/tiltSpeed s.
   float tiltSpeed = 4.0f;
 
   Matrix4D model() const {
@@ -337,9 +352,10 @@ void sceneInit(float width, float height) {
                  GL_STATIC_DRAW, GL_STATIC_DRAW);
 
   // ----- objs (body) ------
-  sScene.objs[0] = {BODY, Matrix4D::scale(0.7f, 0.7f, 2.7f),
-                    Matrix4D::translation({0.0f, 1.5f, 0.4f}),
-                    Matrix4D::rotationX(to_radians(8.0f))};
+  sScene.objs[0] = {
+      BODY, Matrix4D::scale(0.7f, 0.7f, 2.7f),
+      Matrix4D::translation({0.0f, 1.5f, 0.4f}),
+      Matrix4D::rotationX(to_radians(8.0f))}; // tilt by 8 degree by drawing
   sScene.objs[1] = {BODY, Matrix4D::scale(0.4f, 0.3f, 3.0f),
                     Matrix4D::translation({0.0f, 2.0f, -5.0f})};
   // ----- objs plane and foot -----
@@ -377,6 +393,8 @@ void sceneUpdate(float dt) {
   }
 
   const bool *k = sInput.keyPressed;
+  // turn off movement input by multiplying by 0 or 1 depending if
+  // locked/unlocked.
   const float lock = o.controlsUnlocked ? 1.0f : 0.0f;
   const float fwd = lock * (float(k[KEY_W]) - float(k[KEY_S]));
   const float side = lock * (float(k[KEY_A]) - float(k[KEY_D]));
@@ -394,7 +412,8 @@ void sceneUpdate(float dt) {
                left * (side * o.speed * dt) +
                Vector3D(0.0f, vert * o.speed * dt, 0.0f);
 
-  // flight animations
+  // flight animations: ease pitch/roll exponentially towards the target tilt.
+  // Clamp to 1 so a long frame (dt > 1/tiltSpeed) can't overshoot.
   const float targetPitch = fwd * o.maxTilt;
   const float targetRoll = -side * o.maxTilt;
   const float animationEasing = std::min(1.0f, o.tiltSpeed * dt);
@@ -444,6 +463,7 @@ void sceneDraw() {
 
     // draw wings
     const WingAnimation &anim = sScene.animation;
+    // mirroring of the left wings to the right of the ornithopter as well
     const Matrix4D mirrorX = Matrix4D::scale(-1.0f, 1.0f, 1.0f);
     const Mesh wingMesh = sScene.cubeMeshes[WINGS];
     for (size_t i = 0; i < 4; i++) {

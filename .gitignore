@@ -12,3 +12,4 @@ Assignment_1/
 compile_commands.json
 **/.cache/*
 **/bin/*
+*.zip

@@ -1,5 +1,14 @@
 # Assignment 3 - Visual Computing
 
+Deadline: 23.59 23.11.2026
+
+Group: `TMP`
+
+Group-members: 
+- Tim Janush (csbb9638)
+- Paul Kretz (csbb8565)
+- Matti Fischbach (csbb8241)
+
 ## Setup
 
 Create an build dir and initialize `cmake`:
